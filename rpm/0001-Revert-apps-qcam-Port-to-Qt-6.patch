@@ -10,14 +10,14 @@ This reverts commit 71aa3ceec30b152fe5a02aba968c8c72cb47149e.
  2 files changed, 33 insertions(+), 14 deletions(-)
 
 diff --git a/README.rst b/README.rst
-index 4068c6cc83ca9503d00a81c7d15473770ed4c17d..21636e093fb31f74b3986405859c0023809e1d53 100644
+index e2a6e275895e3f82d198e06d37b0f01c699405ed..b7f26c93012b2862affa787d52f24b3e1d13dbbe 100644
 --- a/README.rst
 +++ b/README.rst
-@@ -85,7 +85,7 @@ for cam: [optional]
-         - libsdl2-dev: Enables the SDL sink
+@@ -86,7 +86,7 @@ for cam: [optional]
+         - libtiff-dev: Enables writing DNG
  
  for qcam: [optional]
--        libtiff-dev qt6-base-dev qt6-tools-dev-tools
+-        libtiff-dev qt6-base-dev
 +        libtiff-dev qtbase5-dev qttools5-dev-tools
  
  for tracing with lttng: [optional]

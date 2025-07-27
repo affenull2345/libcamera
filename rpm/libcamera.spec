@@ -1,6 +1,6 @@
 Name:       libcamera
 Summary:    A library to support complex camera ISPs
-Version:    0.4.0
+Version:    0.5.1
 Release:    1
 License:    LGPLv2+
 URL:        https://libcamera.org
@@ -64,9 +64,10 @@ export LDFLAGS="-Wl,--copy-dt-needed-entries"
 %meson \
     -Ddocumentation=disabled \
     -Dgstreamer=enabled \
+    -Dpipelines=imx8-isi,mali-c55,rkisp1,rpi/vc4,simple,unisoc \
     -Dpycamera=disabled \
     -Dtracing=disabled \
-    -Dv4l2=true
+    -Dv4l2=enabled
 
 %meson_build
 
