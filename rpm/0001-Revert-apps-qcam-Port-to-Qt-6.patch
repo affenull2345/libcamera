@@ -6,14 +6,14 @@ Subject: [PATCH] Revert "apps: qcam: Port to Qt 6"
 This reverts commit 71aa3ceec30b152fe5a02aba968c8c72cb47149e.
 ---
  README.rst                |  2 +-
- src/apps/qcam/meson.build | 48 ++++++++++++++++++++++++---------------
- 2 files changed, 31 insertions(+), 19 deletions(-)
+ src/apps/qcam/meson.build | 45 ++++++++++++++++++++++++++++-----------
+ 2 files changed, 33 insertions(+), 14 deletions(-)
 
 diff --git a/README.rst b/README.rst
-index e9a7dd82de7477748e10b651847dea89bd1b6498..c5b742e4369fd32309e3ae6466dd468338ecbc96 100644
+index e2a6e275895e3f82d198e06d37b0f01c699405ed..b7f26c93012b2862affa787d52f24b3e1d13dbbe 100644
 --- a/README.rst
 +++ b/README.rst
-@@ -87,7 +87,7 @@ for cam: [optional]
+@@ -86,7 +86,7 @@ for cam: [optional]
          - libtiff-dev: Enables writing DNG
  
  for qcam: [optional]
@@ -23,7 +23,7 @@ index e9a7dd82de7477748e10b651847dea89bd1b6498..c5b742e4369fd32309e3ae6466dd4683
  for tracing with lttng: [optional]
          liblttng-ust-dev python3-jinja2 lttng-tools
 diff --git a/src/apps/qcam/meson.build b/src/apps/qcam/meson.build
-index 9ca047b0f92703f3b1439b7738483a98a96e05a7..b395592df38195a163af1b7c768019d21faeaae8 100644
+index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d21faeaae8 100644
 --- a/src/apps/qcam/meson.build
 +++ b/src/apps/qcam/meson.build
 @@ -1,13 +1,13 @@
@@ -45,7 +45,7 @@ index 9ca047b0f92703f3b1439b7738483a98a96e05a7..b395592df38195a163af1b7c768019d2
      qcam_enabled = false
      subdir_done()
  endif
-@@ -20,38 +20,50 @@ qcam_sources = files([
+@@ -20,31 +20,50 @@ qcam_sources = files([
      'main.cpp',
      'main_window.cpp',
      'message_handler.cpp',
@@ -72,11 +72,7 @@ index 9ca047b0f92703f3b1439b7738483a98a96e05a7..b395592df38195a163af1b7c768019d2
      '-Wno-extra-semi',
  ]
  
--# gcc 12 and 13 output a false positive variable shadowing warning with Qt
--# 6.9.0 and newer. Silence it.
--if qt6_dep.version().version_compare('>=6.9.0') and \
--   cxx.version().version_compare('>=12') and cxx.version().version_compare('<14')
--    qt6_cpp_args += ['-Wno-shadow']
+-resources = qt6.preprocess(moc_headers : qcam_moc_headers,
 +if cxx.has_header_symbol('QOpenGLWidget', 'QOpenGLWidget',
 +                         dependencies : qt5_dep, args : '-fPIC')
 +    qcam_sources += files([
@@ -88,9 +84,8 @@ index 9ca047b0f92703f3b1439b7738483a98a96e05a7..b395592df38195a163af1b7c768019d2
 +    qcam_resources += files([
 +        'assets/shader/shaders.qrc'
 +    ])
- endif
- 
--resources = qt6.preprocess(moc_headers : qcam_moc_headers,
++endif
++
 +# gcc 9 introduced a deprecated-copy warning that is triggered by Qt until
 +# Qt 5.13. clang 10 introduced the same warning, but detects more issues
 +# that are not fixed in Qt yet. Disable the warning manually in both cases.
@@ -107,7 +102,7 @@ index 9ca047b0f92703f3b1439b7738483a98a96e05a7..b395592df38195a163af1b7c768019d2
  
  qcam  = executable('qcam', qcam_sources, resources,
                     install : true,
-@@ -61,6 +73,6 @@ qcam  = executable('qcam', qcam_sources, resources,
+@@ -54,6 +73,6 @@ qcam  = executable('qcam', qcam_sources, resources,
                         libatomic,
                         libcamera_public,
                         libtiff,
