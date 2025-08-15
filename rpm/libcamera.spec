@@ -1,6 +1,6 @@
 Name:       libcamera
 Summary:    A library to support complex camera ISPs
-Version:    0.5.1
+Version:    0.5.2
 Release:    1
 License:    LGPLv2+
 URL:        https://libcamera.org
