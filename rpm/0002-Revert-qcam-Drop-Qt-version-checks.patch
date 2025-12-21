@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Matti=20Lehtim=C3=A4ki?= <matti.lehtimaki@gmail.com>
-Date: Tue, 19 Nov 2024 23:00:50 +0200
+From: =?UTF-8?q?Otto=20Pfl=C3=BCger?= <otto.pflueger@abscue.de>
+Date: Sat, 20 Dec 2025 14:51:48 +0000
 Subject: [PATCH] Revert "qcam: Drop Qt version checks"
 
 This reverts commit e5fd3bea77fb1f02479c68e13a34e49027dad2dc.
@@ -10,7 +10,7 @@ This reverts commit e5fd3bea77fb1f02479c68e13a34e49027dad2dc.
  2 files changed, 14 insertions(+)
 
 diff --git a/src/apps/qcam/main_window.cpp b/src/apps/qcam/main_window.cpp
-index 7e3f3da605c4b6128c66efb9a6629ee48070c67f..8bdb26a661412483afd0fa4b731f8ba201ebdfb6 100644
+index 96a2d50901b7d95200d624e5eb466afc81c2f653..dcb1d885fb0dd09db676d56af0564ae19839ff43 100644
 --- a/src/apps/qcam/main_window.cpp
 +++ b/src/apps/qcam/main_window.cpp
 @@ -37,6 +37,16 @@

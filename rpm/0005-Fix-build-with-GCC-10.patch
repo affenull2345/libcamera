@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Otto=20Pfl=C3=BCger?= <otto.pflueger@abscue.de>
+Date: Sun, 21 Dec 2025 16:14:10 +0000
+Subject: [PATCH] Fix build with GCC 10
+
+---
+ include/libcamera/internal/global_configuration.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/libcamera/internal/global_configuration.h b/include/libcamera/internal/global_configuration.h
+index 8d09517edca1a4806abd4a7f45368eec8e69e993..42be6a189ef95364cfd82ea8940b7ba0bb1fc5c6 100644
+--- a/include/libcamera/internal/global_configuration.h
++++ b/include/libcamera/internal/global_configuration.h
+@@ -36,7 +36,7 @@ public:
+ 		for (auto part : confPath) {
+ 			c = &(*c)[part];
+ 			if (!*c)
+-				return {};
++				return std::nullopt;
+ 		}
+ 		return c->get<T>();
+ 	}

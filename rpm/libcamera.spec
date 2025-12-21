@@ -1,6 +1,6 @@
 Name:       libcamera
 Summary:    A library to support complex camera ISPs
-Version:    0.5.1
+Version:    0.6.0
 Release:    1
 License:    LGPLv2+
 URL:        https://libcamera.org
@@ -8,6 +8,8 @@ Source:     %{name}-%{version}.tar.bz2
 Patch1:     0001-Revert-apps-qcam-Port-to-Qt-6.patch
 Patch2:     0002-Revert-qcam-Drop-Qt-version-checks.patch
 Patch3:     0003-Fix-build-with-python-3.8-and-older.patch
+Patch4:     0004-Revert-libcamera-process-Remove-ProcessManager-singl.patch
+Patch5:     0005-Fix-build-with-GCC-10.patch
 
 BuildRequires: boost-devel
 BuildRequires: cmake
@@ -64,6 +66,7 @@ export LDFLAGS="-Wl,--copy-dt-needed-entries"
 %meson \
     -Ddocumentation=disabled \
     -Dgstreamer=enabled \
+    -Dlibunwind=disabled \
     -Dpipelines=imx8-isi,mali-c55,rkisp1,rpi/vc4,simple,unisoc \
     -Dpycamera=disabled \
     -Dtracing=disabled \

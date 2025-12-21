@@ -1,0 +1,458 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Otto=20Pfl=C3=BCger?= <otto.pflueger@abscue.de>
+Date: Sat, 20 Dec 2025 14:58:20 +0000
+Subject: [PATCH] Revert "libcamera: process: Remove `ProcessManager`
+ singleton"
+
+This reverts commit b37e69d4348a0c3db80597dac19e801d19780d1c.
+---
+ include/libcamera/internal/camera_manager.h |   1 +
+ include/libcamera/internal/process.h        |  34 ++-
+ meson.build                                 |   2 +-
+ src/libcamera/process.cpp                   | 246 +++++++++++++++-----
+ test/ipc/unixsocket_ipc.cpp                 |   2 +
+ test/log/log_process.cpp                    |   2 +
+ test/process/process_test.cpp               |   2 +
+ 7 files changed, 228 insertions(+), 61 deletions(-)
+
+diff --git a/include/libcamera/internal/camera_manager.h b/include/libcamera/internal/camera_manager.h
+index 755928ce60a5d947526386bb525256385cf32bd1..e8082eb34fce4b6a19c029cf49bff8345a700e9b 100644
+--- a/include/libcamera/internal/camera_manager.h
++++ b/include/libcamera/internal/camera_manager.h
+@@ -71,6 +71,7 @@ private:
+ 	std::unique_ptr<DeviceEnumerator> enumerator_;
+ 
+ 	std::unique_ptr<IPAManager> ipaManager_;
++	ProcessManager processManager_;
+ 
+ 	const GlobalConfiguration configuration_;
+ };
+diff --git a/include/libcamera/internal/process.h b/include/libcamera/internal/process.h
+index 27d4b9258390b2cf27d712b9df8029a06f6b7fe6..e55d11fa34db0a0e4b84fb26e587ea7e033ebeaa 100644
+--- a/include/libcamera/internal/process.h
++++ b/include/libcamera/internal/process.h
+@@ -7,6 +7,7 @@
+ 
+ #pragma once
+ 
++#include <signal.h>
+ #include <string>
+ 
+ #include <libcamera/base/class.h>
+@@ -44,14 +45,41 @@ public:
+ private:
+ 	LIBCAMERA_DISABLE_COPY_AND_MOVE(Process)
+ 
+-	void onPidfdNotify();
++	int isolate();
++	void died(int wstatus);
+ 
+ 	pid_t pid_;
+ 	enum ExitStatus exitStatus_;
+ 	int exitCode_;
+ 
+-	UniqueFD pidfd_;
+-	std::unique_ptr<EventNotifier> pidfdNotify_;
++	friend class ProcessManager;
++};
++
++class ProcessManager
++{
++public:
++	ProcessManager();
++	~ProcessManager();
++
++	void registerProcess(Process *proc);
++
++	static ProcessManager *instance();
++
++	int writePipe() const;
++
++	const struct sigaction &oldsa() const;
++
++private:
++	static ProcessManager *self_;
++
++	void sighandler();
++
++	std::list<Process *> processes_;
++
++	struct sigaction oldsa_;
++
++	EventNotifier *sigEvent_;
++	UniqueFD pipe_[2];
+ };
+ 
+ } /* namespace libcamera */
+diff --git a/meson.build b/meson.build
+index d6757904c8096b5964f52406d379104eb96e5dbf..5cd946b41ac3150e260e4122b20d5dddc60a885c 100644
+--- a/meson.build
++++ b/meson.build
+@@ -266,7 +266,7 @@ subdir('Documentation')
+ subdir('test')
+ 
+ if not meson.is_cross_build()
+-    kernel_version_req = '>= 5.4.0'
++    kernel_version_req = '>= 5.0.0'
+     kernel_version = run_command('uname', '-r', check : true).stdout().strip()
+     if not kernel_version.version_compare(kernel_version_req)
+         warning('The current running kernel version @0@ is too old to run libcamera.'
+diff --git a/src/libcamera/process.cpp b/src/libcamera/process.cpp
+index 3090d75681db7dc24746dd3d82a2399defc7e56d..ce6e4c380d3abf4b4b616dd985e4fa444150ef37 100644
+--- a/src/libcamera/process.cpp
++++ b/src/libcamera/process.cpp
+@@ -10,19 +10,15 @@
+ #include <algorithm>
+ #include <dirent.h>
+ #include <fcntl.h>
++#include <list>
+ #include <signal.h>
+ #include <string.h>
+ #include <sys/socket.h>
+-#include <sys/syscall.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+ #include <unistd.h>
+-#include <utility>
+ #include <vector>
+ 
+-#include <linux/sched.h>
+-#include <linux/wait.h> /* glibc only provides `P_PIDFD` in `sys/wait.h` since 2.36 */
+-
+ #include <libcamera/base/event_notifier.h>
+ #include <libcamera/base/log.h>
+ #include <libcamera/base/utils.h>
+@@ -36,8 +32,37 @@ namespace libcamera {
+ 
+ LOG_DEFINE_CATEGORY(Process)
+ 
++/**
++ * \class ProcessManager
++ * \brief Manager of processes
++ *
++ * The ProcessManager singleton keeps track of all created Process instances,
++ * and manages the signal handling involved in terminating processes.
++ */
++
+ namespace {
+ 
++void sigact(int signal, siginfo_t *info, void *ucontext)
++{
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wunused-result"
++	/*
++	 * We're in a signal handler so we can't log any message, and we need
++	 * to continue anyway.
++	 */
++	char data = 0;
++	write(ProcessManager::instance()->writePipe(), &data, sizeof(data));
++#pragma GCC diagnostic pop
++
++	const struct sigaction &oldsa = ProcessManager::instance()->oldsa();
++	if (oldsa.sa_flags & SA_SIGINFO) {
++		oldsa.sa_sigaction(signal, info, ucontext);
++	} else {
++		if (oldsa.sa_handler != SIG_IGN && oldsa.sa_handler != SIG_DFL)
++			oldsa.sa_handler(signal);
++	}
++}
++
+ void closeAllFdsExcept(std::vector<int> v)
+ {
+ 	sort(v.begin(), v.end());
+@@ -92,6 +117,129 @@ void closeAllFdsExcept(std::vector<int> v)
+ 
+ } /* namespace */
+ 
++void ProcessManager::sighandler()
++{
++	char data;
++	ssize_t ret = read(pipe_[0].get(), &data, sizeof(data));
++	if (ret < 0) {
++		LOG(Process, Error)
++			<< "Failed to read byte from signal handler pipe";
++		return;
++	}
++
++	for (auto it = processes_.begin(); it != processes_.end();) {
++		Process *process = *it;
++
++		int wstatus;
++		pid_t pid = waitpid(process->pid_, &wstatus, WNOHANG);
++		if (process->pid_ != pid) {
++			++it;
++			continue;
++		}
++
++		it = processes_.erase(it);
++		process->died(wstatus);
++	}
++}
++
++/**
++ * \brief Register process with process manager
++ * \param[in] proc Process to register
++ *
++ * This function registers the \a proc with the process manager. It
++ * shall be called by the parent process after successfully forking, in
++ * order to let the parent signal process termination.
++ */
++void ProcessManager::registerProcess(Process *proc)
++{
++	processes_.push_back(proc);
++}
++
++ProcessManager *ProcessManager::self_ = nullptr;
++
++/**
++ * \brief Construct a ProcessManager instance
++ *
++ * The ProcessManager class is meant to only be instantiated once, by the
++ * CameraManager.
++ */
++ProcessManager::ProcessManager()
++{
++	if (self_)
++		LOG(Process, Fatal)
++			<< "Multiple ProcessManager objects are not allowed";
++
++	sigaction(SIGCHLD, NULL, &oldsa_);
++
++	struct sigaction sa;
++	memset(&sa, 0, sizeof(sa));
++	sa.sa_sigaction = &sigact;
++	memcpy(&sa.sa_mask, &oldsa_.sa_mask, sizeof(sa.sa_mask));
++	sigaddset(&sa.sa_mask, SIGCHLD);
++	sa.sa_flags = oldsa_.sa_flags | SA_SIGINFO;
++
++	sigaction(SIGCHLD, &sa, NULL);
++
++	int pipe[2];
++	if (pipe2(pipe, O_CLOEXEC | O_DIRECT | O_NONBLOCK))
++		LOG(Process, Fatal)
++			<< "Failed to initialize pipe for signal handling";
++
++	pipe_[0] = UniqueFD(pipe[0]);
++	pipe_[1] = UniqueFD(pipe[1]);
++
++	sigEvent_ = new EventNotifier(pipe_[0].get(), EventNotifier::Read);
++	sigEvent_->activated.connect(this, &ProcessManager::sighandler);
++
++	self_ = this;
++}
++
++ProcessManager::~ProcessManager()
++{
++	sigaction(SIGCHLD, &oldsa_, NULL);
++
++	delete sigEvent_;
++
++	self_ = nullptr;
++}
++
++/**
++ * \brief Retrieve the Process manager instance
++ *
++ * The ProcessManager is constructed by the CameraManager. This function shall
++ * be used to retrieve the single instance of the manager.
++ *
++ * \return The Process manager instance
++ */
++ProcessManager *ProcessManager::instance()
++{
++	return self_;
++}
++
++/**
++ * \brief Retrieve the Process manager's write pipe
++ *
++ * This function is meant only to be used by the static signal handler.
++ *
++ * \return Pipe for writing
++ */
++int ProcessManager::writePipe() const
++{
++	return pipe_[1].get();
++}
++
++/**
++ * \brief Retrive the old signal action data
++ *
++ * This function is meant only to be used by the static signal handler.
++ *
++ * \return The old signal action data
++ */
++const struct sigaction &ProcessManager::oldsa() const
++{
++	return oldsa_;
++}
++
+ /**
+  * \class Process
+  * \brief Process object
+@@ -142,6 +290,8 @@ int Process::start(const std::string &path,
+ 		   Span<const std::string> args,
+ 		   Span<const int> fds)
+ {
++	int ret;
++
+ 	if (pid_ > 0)
+ 		return -EBUSY;
+ 
+@@ -150,29 +300,20 @@ int Process::start(const std::string &path,
+ 			return -EINVAL;
+ 	}
+ 
+-	clone_args cargs = {};
+-	int pidfd;
+-
+-	cargs.flags = CLONE_PIDFD | CLONE_NEWUSER | CLONE_NEWNET;
+-	cargs.pidfd = reinterpret_cast<uintptr_t>(&pidfd);
+-	cargs.exit_signal = SIGCHLD;
+-
+-	long childPid = syscall(SYS_clone3, &cargs, sizeof(cargs));
+-	if (childPid < 0) {
+-		int ret = -errno;
++	int childPid = fork();
++	if (childPid == -1) {
++		ret = -errno;
+ 		LOG(Process, Error) << "Failed to fork: " << strerror(-ret);
+ 		return ret;
+-	}
+-
+-	if (childPid) {
++	} else if (childPid) {
+ 		pid_ = childPid;
+-		pidfd_ = UniqueFD(pidfd);
+-		pidfdNotify_ = std::make_unique<EventNotifier>(pidfd_.get(), EventNotifier::Type::Read);
+-		pidfdNotify_->activated.connect(this, &Process::onPidfdNotify);
++		ProcessManager::instance()->registerProcess(this);
+ 
+-		LOG(Process, Debug) << this << "[" << childPid << ':' << pidfd << "]"
+-				    << " forked";
++		return 0;
+ 	} else {
++		if (isolate())
++			_exit(EXIT_FAILURE);
++
+ 		std::vector<int> v(fds.begin(), fds.end());
+ 		v.push_back(STDERR_FILENO);
+ 		closeAllFdsExcept(std::move(v));
+@@ -205,44 +346,35 @@ int Process::start(const std::string &path,
+ 
+ 		_exit(EXIT_FAILURE);
+ 	}
+-
+-	return 0;
+ }
+ 
+-void Process::onPidfdNotify()
++int Process::isolate()
+ {
+-	auto pidfdNotify = std::exchange(pidfdNotify_, {});
+-	auto pidfd = std::exchange(pidfd_, {});
+-	auto pid = std::exchange(pid_, -1);
+-
+-	ASSERT(pidfdNotify);
+-	ASSERT(pidfd.isValid());
+-	ASSERT(pid > 0);
+-
+-	siginfo_t info;
+-
+-	/*
+-	 * `static_cast` is needed because `P_PIDFD` is not defined in `sys/wait.h` if the C standard library
+-	 * is old enough. So `P_PIDFD` is taken from `linux/wait.h`, where it is just an integer #define.
+-	 */
+-	if (waitid(static_cast<idtype_t>(P_PIDFD), pidfd.get(), &info, WNOHANG | WEXITED) >= 0) {
+-		ASSERT(info.si_pid == pid);
++	int ret = unshare(CLONE_NEWUSER | CLONE_NEWNET);
++	if (ret) {
++		ret = -errno;
++		LOG(Process, Error) << "Failed to unshare execution context: "
++				    << strerror(-ret);
++		return ret;
++	}
+ 
+-		LOG(Process, Debug)
+-			<< this << "[" << pid << ':' << pidfd.get() << "]"
+-			<< " code: " << info.si_code
+-			<< " status: " << info.si_status;
++	return 0;
++}
+ 
+-		exitStatus_ = info.si_code == CLD_EXITED ? Process::NormalExit : Process::SignalExit;
+-		exitCode_ = info.si_code == CLD_EXITED ? info.si_status : -1;
++/**
++ * \brief SIGCHLD handler
++ * \param[in] wstatus The status as output by waitpid()
++ *
++ * This function is called when the process associated with Process terminates.
++ * It emits the Process::finished signal.
++ */
++void Process::died(int wstatus)
++{
++	pid_ = -1;
++	exitStatus_ = WIFEXITED(wstatus) ? NormalExit : SignalExit;
++	exitCode_ = exitStatus_ == NormalExit ? WEXITSTATUS(wstatus) : -1;
+ 
+-		finished.emit(exitStatus_, exitCode_);
+-	} else {
+-		int err = errno;
+-		LOG(Process, Warning)
+-			<< this << "[" << pid << ":" << pidfd.get() << "]"
+-			<< " waitid() failed: " << strerror(err);
+-	}
++	finished.emit(exitStatus_, exitCode_);
+ }
+ 
+ /**
+@@ -280,8 +412,8 @@ void Process::onPidfdNotify()
+  */
+ void Process::kill()
+ {
+-	if (pidfd_.isValid())
+-		syscall(SYS_pidfd_send_signal, pidfd_.get(), SIGKILL, nullptr, 0);
++	if (pid_ > 0)
++		::kill(pid_, SIGKILL);
+ }
+ 
+ } /* namespace libcamera */
+diff --git a/test/ipc/unixsocket_ipc.cpp b/test/ipc/unixsocket_ipc.cpp
+index f3e3c09efd04808a024de2f238f5215f678a7aca..df7d9c2b4ef7c624c39afdb7ee52493ff9d3fde8 100644
+--- a/test/ipc/unixsocket_ipc.cpp
++++ b/test/ipc/unixsocket_ipc.cpp
+@@ -209,6 +209,8 @@ protected:
+ 	}
+ 
+ private:
++	ProcessManager processManager_;
++
+ 	unique_ptr<IPCPipeUnixSocket> ipc_;
+ };
+ 
+diff --git a/test/log/log_process.cpp b/test/log/log_process.cpp
+index 367b78803b5f98e794bdd5ae0e01979d80216470..9609e23d5d43cb5432f1d97348f59dec75c7ed70 100644
+--- a/test/log/log_process.cpp
++++ b/test/log/log_process.cpp
+@@ -137,6 +137,8 @@ private:
+ 		exitCode_ = exitCode;
+ 	}
+ 
++	ProcessManager processManager_;
++
+ 	Process proc_;
+ 	Process::ExitStatus exitStatus_ = Process::NotExited;
+ 	string logPath_;
+diff --git a/test/process/process_test.cpp b/test/process/process_test.cpp
+index fe76666e65cf44954a8e7f95077e6ad054193f25..a88d8fef137ab08b230ae9ff366bde5ea1763838 100644
+--- a/test/process/process_test.cpp
++++ b/test/process/process_test.cpp
+@@ -86,6 +86,8 @@ private:
+ 		exitCode_ = exitCode;
+ 	}
+ 
++	ProcessManager processManager_;
++
+ 	Process proc_;
+ 	enum Process::ExitStatus exitStatus_;
+ 	int exitCode_;

@@ -1,19 +1,19 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Matti=20Lehtim=C3=A4ki?= <matti.lehtimaki@gmail.com>
-Date: Sat, 21 Sep 2024 18:51:06 +0300
+From: =?UTF-8?q?Otto=20Pfl=C3=BCger?= <otto.pflueger@abscue.de>
+Date: Sat, 20 Dec 2025 14:51:45 +0000
 Subject: [PATCH] Revert "apps: qcam: Port to Qt 6"
 
 This reverts commit 71aa3ceec30b152fe5a02aba968c8c72cb47149e.
 ---
  README.rst                |  2 +-
- src/apps/qcam/meson.build | 45 ++++++++++++++++++++++++++++-----------
- 2 files changed, 33 insertions(+), 14 deletions(-)
+ src/apps/qcam/meson.build | 55 +++++++++++++++++++++------------------
+ 2 files changed, 31 insertions(+), 26 deletions(-)
 
 diff --git a/README.rst b/README.rst
-index e2a6e275895e3f82d198e06d37b0f01c699405ed..b7f26c93012b2862affa787d52f24b3e1d13dbbe 100644
+index 56b2e0956e36b8f2b365a2793eaea35e18bde71c..f400de15736b4a2f6696843f49ca4ae06183205e 100644
 --- a/README.rst
 +++ b/README.rst
-@@ -86,7 +86,7 @@ for cam: [optional]
+@@ -87,7 +87,7 @@ for cam: [optional]
          - libtiff-dev: Enables writing DNG
  
  for qcam: [optional]
@@ -23,7 +23,7 @@ index e2a6e275895e3f82d198e06d37b0f01c699405ed..b7f26c93012b2862affa787d52f24b3e
  for tracing with lttng: [optional]
          liblttng-ust-dev python3-jinja2 lttng-tools
 diff --git a/src/apps/qcam/meson.build b/src/apps/qcam/meson.build
-index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d21faeaae8 100644
+index 33600095ff9d737945b34c042b192de6e88a963d..6cf4c171e668ee6cc6b9e369b26a8e3cac85812d 100644
 --- a/src/apps/qcam/meson.build
 +++ b/src/apps/qcam/meson.build
 @@ -1,13 +1,13 @@
@@ -45,7 +45,7 @@ index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d2
      qcam_enabled = false
      subdir_done()
  endif
-@@ -20,31 +20,50 @@ qcam_sources = files([
+@@ -20,38 +20,46 @@ qcam_sources = files([
      'main.cpp',
      'main_window.cpp',
      'message_handler.cpp',
@@ -66,13 +66,17 @@ index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d2
  ])
  
 -qt6_cpp_args = [
-+qt5_cpp_args = [
-     apps_cpp_args,
-     '-DQT_NO_KEYWORDS',
-     '-Wno-extra-semi',
- ]
+-    apps_cpp_args,
+-    '-DQT_NO_KEYWORDS',
+-    '-Wno-extra-semi',
+-]
++qt5_cpp_args = [apps_cpp_args, '-DQT_NO_KEYWORDS']
  
--resources = qt6.preprocess(moc_headers : qcam_moc_headers,
+-# gcc 12 and 13 output a false positive variable shadowing warning with Qt
+-# 6.9.0 and newer. Silence it.
+-if qt6_dep.version().version_compare('>=6.9.0') and \
+-   cxx.version().version_compare('>=12') and cxx.version().version_compare('<14')
+-    qt6_cpp_args += ['-Wno-shadow']
 +if cxx.has_header_symbol('QOpenGLWidget', 'QOpenGLWidget',
 +                         dependencies : qt5_dep, args : '-fPIC')
 +    qcam_sources += files([
@@ -84,8 +88,9 @@ index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d2
 +    qcam_resources += files([
 +        'assets/shader/shaders.qrc'
 +    ])
-+endif
-+
+ endif
+ 
+-resources = qt6.preprocess(moc_headers : qcam_moc_headers,
 +# gcc 9 introduced a deprecated-copy warning that is triggered by Qt until
 +# Qt 5.13. clang 10 introduced the same warning, but detects more issues
 +# that are not fixed in Qt yet. Disable the warning manually in both cases.
@@ -102,7 +107,7 @@ index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d2
  
  qcam  = executable('qcam', qcam_sources, resources,
                     install : true,
-@@ -54,6 +73,6 @@ qcam  = executable('qcam', qcam_sources, resources,
+@@ -61,9 +69,6 @@ qcam  = executable('qcam', qcam_sources, resources,
                         libatomic,
                         libcamera_public,
                         libtiff,
@@ -110,4 +115,7 @@ index f7c14064337350d6f676711688f2df178d51f10b..b395592df38195a163af1b7c768019d2
 +                       qt5_dep,
                     ],
 -                   cpp_args : qt6_cpp_args)
+-
+-# Note: qt6.preprocess does not automatically rebuild when the
+-# qcam_resources dependency chain is updated.
 +                   cpp_args : qt5_cpp_args)
